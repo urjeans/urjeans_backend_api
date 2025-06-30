@@ -28,9 +28,9 @@ CREATE TABLE IF NOT EXISTS users (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
--- Create admin user (password will be updated in the application)
+-- Create admin user with proper bcrypt hash for password 'Admin@123'
 INSERT IGNORE INTO users (username, password, role) 
-VALUES ('admin', '$2a$10$placeholder_for_hashed_password', 'admin');
+VALUES ('admin', '$2b$10$yHKnJPgCvWzQafepOoupLOztl.CWuZrGkwfamVNZlIBY13H1iA6Xe', 'admin');
 
 -- Insert sample products data
 INSERT IGNORE INTO products (brand_name, colors, images, fabric, sizes, description) VALUES

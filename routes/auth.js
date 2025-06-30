@@ -50,22 +50,16 @@ router.post('/login', loginValidation, async (req, res) => {
 
         const user = users[0];
 
-        // Verify password - ensure both password and hash exist
-        if (!user.password_hash) {
+        // Verify password - ensure password hash exists
+        if (!user.password) {
             console.error('User has no password hash:', user.id);
             return res.status(500).json({ error: 'User account configuration error' });
         }
 
-        const isMatch = await bcrypt.compare(password, user.password_hash);
+        const isMatch = await bcrypt.compare(password, user.password);
         if (!isMatch) {
             return res.status(401).json({ error: 'Invalid credentials' });
         }
-
-        // Update last login
-        await pool.query(
-            'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?',
-            [user.id]
-        );
 
         // Generate JWT token
         const token = jwt.sign(
@@ -78,9 +72,7 @@ router.post('/login', loginValidation, async (req, res) => {
         res.json({
             user: {
                 id: user.id,
-                username: user.username,
-                email: user.email,
-                role: user.role
+                username: user.username
             },
             token
         });
@@ -115,12 +107,12 @@ router.post('/change-password', auth, passwordChangeValidation, async (req, res)
         const user = users[0];
 
         // Verify current password - ensure hash exists
-        if (!user.password_hash) {
+        if (!user.password) {
             console.error('User has no password hash:', user.id);
             return res.status(500).json({ error: 'User account configuration error' });
         }
 
-        const isMatch = await bcrypt.compare(currentPassword, user.password_hash);
+        const isMatch = await bcrypt.compare(currentPassword, user.password);
         if (!isMatch) {
             return res.status(401).json({ error: 'Current password is incorrect' });
         }
@@ -129,9 +121,9 @@ router.post('/change-password', auth, passwordChangeValidation, async (req, res)
         const salt = await bcrypt.genSalt(10);
         const passwordHash = await bcrypt.hash(newPassword, salt);
 
-        // Update password
+        // Update password in the password column
         await pool.query(
-            'UPDATE users SET password_hash = ? WHERE id = ?',
+            'UPDATE users SET password = ? WHERE id = ?',
             [passwordHash, user.id]
         );
 
@@ -146,7 +138,7 @@ router.post('/change-password', auth, passwordChangeValidation, async (req, res)
 router.get('/me', auth, async (req, res) => {
     try {
         const [users] = await pool.query(
-            'SELECT id, username, email, role, last_login FROM users WHERE id = ?',
+            'SELECT id, username, created_at FROM users WHERE id = ?',
             [req.user.id]
         );
 
