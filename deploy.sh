@@ -38,13 +38,38 @@ if [ ! -d "uploads" ]; then
     echo "✅ Uploads directory created with proper permissions"
 fi
 
-# Install dependencies
+# Clean existing node_modules and package-lock.json for fresh install
+echo "🧹 Cleaning existing dependencies..."
+rm -rf node_modules package-lock.json
+
+# Install dependencies with production flag
 echo "📦 Installing dependencies..."
 npm install --production
 
 if [ $? -ne 0 ]; then
     echo "❌ Failed to install dependencies"
     exit 1
+fi
+
+# Rebuild sharp for Linux platform
+echo "🔧 Rebuilding sharp module for Linux..."
+npm rebuild sharp --platform=linux --arch=x64
+
+if [ $? -ne 0 ]; then
+    echo "⚠️  Warning: Failed to rebuild sharp module. Trying alternative approach..."
+    npm install --os=linux --cpu=x64 sharp
+fi
+
+# Verify critical dependencies
+echo "🔍 Verifying critical dependencies..."
+if [ ! -d "node_modules/express" ]; then
+    echo "❌ Express module not found. Reinstalling..."
+    npm install express
+fi
+
+if [ ! -d "node_modules/bcryptjs" ]; then
+    echo "❌ Bcryptjs module not found. Reinstalling..."
+    npm install bcryptjs
 fi
 
 # Check if PM2 is installed
@@ -80,5 +105,7 @@ if [ $? -eq 0 ]; then
     echo "🛑 To stop: pm2 stop urjeans-backend"
 else
     echo "❌ Failed to start application"
+    echo "📋 Checking application logs..."
+    pm2 logs urjeans-backend --lines 20
     exit 1
 fi 

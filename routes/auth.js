@@ -33,6 +33,11 @@ router.post('/login', loginValidation, async (req, res) => {
 
         const { username, password } = req.body;
 
+        // Additional validation for required fields
+        if (!username || !password) {
+            return res.status(400).json({ error: 'Username and password are required' });
+        }
+
         // Get user from database
         const [users] = await pool.query(
             'SELECT * FROM users WHERE username = ?',
@@ -45,7 +50,12 @@ router.post('/login', loginValidation, async (req, res) => {
 
         const user = users[0];
 
-        // Verify password
+        // Verify password - ensure both password and hash exist
+        if (!user.password_hash) {
+            console.error('User has no password hash:', user.id);
+            return res.status(500).json({ error: 'User account configuration error' });
+        }
+
         const isMatch = await bcrypt.compare(password, user.password_hash);
         if (!isMatch) {
             return res.status(401).json({ error: 'Invalid credentials' });
@@ -91,6 +101,11 @@ router.post('/change-password', auth, passwordChangeValidation, async (req, res)
 
         const { currentPassword, newPassword } = req.body;
 
+        // Additional validation for required fields
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({ error: 'Current password and new password are required' });
+        }
+
         // Get user with current password hash
         const [users] = await pool.query(
             'SELECT * FROM users WHERE id = ?',
@@ -99,7 +114,12 @@ router.post('/change-password', auth, passwordChangeValidation, async (req, res)
 
         const user = users[0];
 
-        // Verify current password
+        // Verify current password - ensure hash exists
+        if (!user.password_hash) {
+            console.error('User has no password hash:', user.id);
+            return res.status(500).json({ error: 'User account configuration error' });
+        }
+
         const isMatch = await bcrypt.compare(currentPassword, user.password_hash);
         if (!isMatch) {
             return res.status(401).json({ error: 'Current password is incorrect' });

@@ -5,7 +5,10 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "postinstall": "npm rebuild sharp --platform=linux --arch=x64 || npm install --os=linux --cpu=x64 sharp",
+    "deploy": "npm install --production && npm rebuild sharp --platform=linux --arch=x64",
+    "ahost-setup": "npm install --production && npm rebuild sharp --platform=linux --arch=x64"
   },
   "dependencies": {
     "bcryptjs": "^3.0.2",
@@ -21,5 +24,12 @@
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "optionalDependencies": {
+    "sharp": "^0.34.2"
   }
 }
