@@ -14,7 +14,11 @@ const HOST = process.env.HOST || '0.0.0.0';
 // Security middleware
 app.use(helmet());
 app.use(cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: [
+        process.env.FRONTEND_URL || 'http://localhost:3000',
+        'http://localhost:5500',  // Add this for development
+        'http://127.0.0.1:5500'   // Also add this
+    ],
     credentials: true
 }));
 
