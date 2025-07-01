@@ -13,14 +13,22 @@ const HOST = process.env.HOST || '0.0.0.0';
 
 // Security middleware
 app.use(helmet());
+// app.use(cors({
+//     origin: [
+//         process.env.FRONTEND_URL || 'http://localhost:3000',
+//         'http://localhost:5500',  // Add this for development
+//         'http://127.0.0.1:5500'   // Also add this
+//     ],
+//     credentials: true
+// }));
+
+
+// Allow CORS globally
 app.use(cors({
-    origin: [
-        process.env.FRONTEND_URL || 'http://localhost:3000',
-        'http://localhost:5500',  // Add this for development
-        'http://127.0.0.1:5500'   // Also add this
-    ],
-    credentials: true
-}));
+    origin: '*', // or specify your frontend: 'https://urjeans.uz'
+    methods: ['GET', 'POST', 'PUT', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+  }));
 
 // Body parsing middleware
 app.use(express.json());
@@ -30,6 +38,12 @@ const uploadDirectory = path.join(__dirname, '../uploads');
 
 // Serve static files from uploads directory
 app.use('/uploads', express.static(uploadDirectory));
+
+
+app.use('/uploads', (req, res, next) => {
+    res.setHeader('Access-Control-Allow-Origin', '*'); // or your specific domain
+    next();
+  }, express.static(uploadDirectory));
 
 // Test database connection
 testConnection();
