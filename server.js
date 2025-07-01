@@ -52,7 +52,7 @@ app.use('/uploads', (req, res, next) => {
     }
     
     next();
-}, express.static(path.join(__dirname, 'uploads')));
+}, express.static(path.join(__dirname, '../../uploads')));
 
 // Test database connection
 testConnection();
