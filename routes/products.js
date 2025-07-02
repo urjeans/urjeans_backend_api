@@ -28,6 +28,32 @@ publicRouter.get('/brand/:brandName', async (req, res) => {
     }
 });
 
+// Get products by style
+publicRouter.get('/style/:style', async (req, res) => {
+    try {
+        const [rows] = await pool.query('SELECT * FROM products WHERE style = ?', [req.params.style]);
+        res.json(rows);
+    } catch (error) {
+        console.error('Error fetching products by style:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Search products by name
+publicRouter.get('/search/:query', async (req, res) => {
+    try {
+        const query = `%${req.params.query}%`;
+        const [rows] = await pool.query(
+            'SELECT * FROM products WHERE product_name LIKE ? OR brand_name LIKE ? OR description LIKE ?',
+            [query, query, query]
+        );
+        res.json(rows);
+    } catch (error) {
+        console.error('Error searching products:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
 // Get single product by ID
 publicRouter.get('/:id', async (req, res) => {
     try {
@@ -49,11 +75,11 @@ router.post('/', upload.array('images', 5), processUploadedImages, async (req, r
         // Get processed image URLs
         const imageUrls = req.processedFiles ? req.processedFiles.map(file => getImageUrl(file.filename)) : [];
         
-        const { brand_name, colors, fabric, sizes, description } = req.body;
+        const { product_name, brand_name, style, colors, fabric, sizes, description } = req.body;
         
         const [result] = await pool.query(
-            'INSERT INTO products (brand_name, colors, images, fabric, sizes, description) VALUES (?, ?, ?, ?, ?, ?)',
-            [brand_name, colors, JSON.stringify(imageUrls), fabric, sizes, description]
+            'INSERT INTO products (product_name, brand_name, style, colors, images, fabric, sizes, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+            [product_name, brand_name, style, colors, JSON.stringify(imageUrls), fabric, sizes, description]
         );
         
         const [newProduct] = await pool.query('SELECT * FROM products WHERE id = ?', [result.insertId]);
@@ -73,7 +99,7 @@ router.post('/', upload.array('images', 5), processUploadedImages, async (req, r
 // Update product with image upload
 router.put('/:id', upload.array('images', 5), processUploadedImages, async (req, res) => {
     try {
-        const { brand_name, colors, fabric, sizes, description } = req.body;
+        const { product_name, brand_name, style, colors, fabric, sizes, description } = req.body;
         
         // Get existing product to check current images
         const [existingProduct] = await pool.query('SELECT images FROM products WHERE id = ?', [req.params.id]);
@@ -107,8 +133,8 @@ router.put('/:id', upload.array('images', 5), processUploadedImages, async (req,
 
         // Update product
         await pool.query(
-            'UPDATE products SET brand_name = ?, colors = ?, images = ?, fabric = ?, sizes = ?, description = ? WHERE id = ?',
-            [brand_name, colors, JSON.stringify(imageUrls), fabric, sizes, description, req.params.id]
+            'UPDATE products SET product_name = ?, brand_name = ?, style = ?, colors = ?, images = ?, fabric = ?, sizes = ?, description = ? WHERE id = ?',
+            [product_name, brand_name, style, colors, JSON.stringify(imageUrls), fabric, sizes, description, req.params.id]
         );
         
         const [updatedProduct] = await pool.query('SELECT * FROM products WHERE id = ?', [req.params.id]);
