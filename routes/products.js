@@ -1,16 +1,44 @@
 const express = require('express');
 const router = express.Router();
+const { body, validationResult } = require('express-validator');
 const { pool } = require('../config/database');
 const { upload, getImageUrl, deleteImage, processUploadedImages } = require('../config/storage');
+
+const productValidation = [
+    body('product_name').trim().notEmpty().withMessage('Product name is required').isLength({ max: 255 }),
+    body('brand_name').trim().notEmpty().withMessage('Brand name is required').isLength({ max: 50 }),
+    body('style').trim().isLength({ max: 100 }),
+    body('colors').trim().notEmpty().withMessage('Colors are required').isLength({ max: 255 }),
+    body('fabric').trim().notEmpty().withMessage('Fabric is required').isLength({ max: 255 }),
+    body('sizes').trim().notEmpty().withMessage('Sizes are required').isLength({ max: 100 }),
+    body('description').trim().isLength({ max: 5000 }),
+];
+
+const parseImages = (raw) => {
+    try {
+        return JSON.parse(raw) || [];
+    } catch {
+        return [];
+    }
+};
 
 // Public routes (no authentication required)
 const publicRouter = express.Router();
 
-// Get all products
+// Get all products with pagination
 publicRouter.get('/', async (req, res) => {
     try {
-        const [rows] = await pool.query('SELECT * FROM products ORDER BY created_at DESC');
-        res.json(rows);
+        const page = Math.max(1, parseInt(req.query.page) || 1);
+        const limit = Math.min(100, parseInt(req.query.limit) || 20);
+        const offset = (page - 1) * limit;
+
+        const [rows] = await pool.query(
+            'SELECT * FROM products ORDER BY created_at DESC LIMIT ? OFFSET ?',
+            [limit, offset]
+        );
+        const [[{ total }]] = await pool.query('SELECT COUNT(*) as total FROM products');
+
+        res.json({ data: rows, total, page, limit });
     } catch (error) {
         console.error('Error fetching products:', error);
         res.status(500).json({ error: 'Internal server error' });
@@ -42,7 +70,9 @@ publicRouter.get('/style/:style', async (req, res) => {
 // Search products by name
 publicRouter.get('/search/:query', async (req, res) => {
     try {
-        const query = `%${req.params.query}%`;
+        const q = req.params.query.trim().slice(0, 100);
+        if (!q) return res.json([]);
+        const query = `%${q}%`;
         const [rows] = await pool.query(
             'SELECT * FROM products WHERE product_name LIKE ? OR brand_name LIKE ? OR description LIKE ?',
             [query, query, query]
@@ -69,83 +99,80 @@ publicRouter.get('/:id', async (req, res) => {
 });
 
 // Protected routes (require authentication and admin privileges)
+
 // Create new product with image upload
-router.post('/', upload.array('images', 5), processUploadedImages, async (req, res) => {
+router.post('/', upload.array('images', 5), processUploadedImages, productValidation, async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        if (req.processedFiles) {
+            for (const file of req.processedFiles) await deleteImage(file.filename);
+        }
+        return res.status(400).json({ errors: errors.array() });
+    }
+
     try {
-        // Get processed image URLs
         const imageUrls = req.processedFiles ? req.processedFiles.map(file => getImageUrl(file.filename)) : [];
-        
         const { product_name, brand_name, style, colors, fabric, sizes, description } = req.body;
-        
+
         const [result] = await pool.query(
             'INSERT INTO products (product_name, brand_name, style, colors, images, fabric, sizes, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
             [product_name, brand_name, style, colors, JSON.stringify(imageUrls), fabric, sizes, description]
         );
-        
+
         const [newProduct] = await pool.query('SELECT * FROM products WHERE id = ?', [result.insertId]);
         res.status(201).json(newProduct[0]);
     } catch (error) {
         console.error('Error creating product:', error);
-        // If there's an error, delete processed images
         if (req.processedFiles) {
-            for (const file of req.processedFiles) {
-                deleteImage(file.filename);
-            }
+            for (const file of req.processedFiles) await deleteImage(file.filename);
         }
         res.status(500).json({ error: 'Internal server error' });
     }
 });
 
 // Update product with image upload
-router.put('/:id', upload.array('images', 5), processUploadedImages, async (req, res) => {
+router.put('/:id', upload.array('images', 5), processUploadedImages, productValidation, async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        if (req.processedFiles) {
+            for (const file of req.processedFiles) await deleteImage(file.filename);
+        }
+        return res.status(400).json({ errors: errors.array() });
+    }
+
     try {
         const { product_name, brand_name, style, colors, fabric, sizes, description } = req.body;
-        
-        // Get existing product to check current images
+
         const [existingProduct] = await pool.query('SELECT images FROM products WHERE id = ?', [req.params.id]);
-        
+
         if (existingProduct.length === 0) {
-            // If there are processed files, delete them
             if (req.processedFiles) {
-                for (const file of req.processedFiles) {
-                    deleteImage(file.filename);
-                }
+                for (const file of req.processedFiles) await deleteImage(file.filename);
             }
             return res.status(404).json({ error: 'Product not found' });
         }
 
-        // Handle image updates
         let imageUrls;
         if (req.processedFiles && req.processedFiles.length > 0) {
-            // If new images are uploaded, use them
             imageUrls = req.processedFiles.map(file => getImageUrl(file.filename));
-            
-            // Delete old images
-            const oldImages = JSON.parse(existingProduct[0].images);
-            for (const oldImageUrl of oldImages) {
-                const filename = oldImageUrl.split('/').pop();
-                deleteImage(filename);
+            for (const oldImageUrl of parseImages(existingProduct[0].images)) {
+                await deleteImage(oldImageUrl.split('/').pop());
             }
         } else {
-            // If no new images, keep existing ones
-            imageUrls = JSON.parse(existingProduct[0].images);
+            imageUrls = parseImages(existingProduct[0].images);
         }
 
-        // Update product
         await pool.query(
             'UPDATE products SET product_name = ?, brand_name = ?, style = ?, colors = ?, images = ?, fabric = ?, sizes = ?, description = ? WHERE id = ?',
             [product_name, brand_name, style, colors, JSON.stringify(imageUrls), fabric, sizes, description, req.params.id]
         );
-        
+
         const [updatedProduct] = await pool.query('SELECT * FROM products WHERE id = ?', [req.params.id]);
         res.json(updatedProduct[0]);
     } catch (error) {
         console.error('Error updating product:', error);
-        // If there's an error, delete processed images
         if (req.processedFiles) {
-            for (const file of req.processedFiles) {
-                deleteImage(file.filename);
-            }
+            for (const file of req.processedFiles) await deleteImage(file.filename);
         }
         res.status(500).json({ error: 'Internal server error' });
     }
@@ -154,22 +181,17 @@ router.put('/:id', upload.array('images', 5), processUploadedImages, async (req,
 // Delete product (with image cleanup)
 router.delete('/:id', async (req, res) => {
     try {
-        // Get product images before deletion
         const [product] = await pool.query('SELECT images FROM products WHERE id = ?', [req.params.id]);
-        
+
         if (product.length === 0) {
             return res.status(404).json({ error: 'Product not found' });
         }
 
-        // Delete images
-        const images = JSON.parse(product[0].images);
-        for (const imageUrl of images) {
-            const filename = imageUrl.split('/').pop();
-            deleteImage(filename);
+        for (const imageUrl of parseImages(product[0].images)) {
+            await deleteImage(imageUrl.split('/').pop());
         }
 
-        // Delete product from database
-        const [result] = await pool.query('DELETE FROM products WHERE id = ?', [req.params.id]);
+        await pool.query('DELETE FROM products WHERE id = ?', [req.params.id]);
         res.json({ message: 'Product deleted successfully' });
     } catch (error) {
         console.error('Error deleting product:', error);
@@ -177,4 +199,4 @@ router.delete('/:id', async (req, res) => {
     }
 });
 
-module.exports = { publicRouter, protectedRouter: router }; 
+module.exports = { publicRouter, protectedRouter: router };

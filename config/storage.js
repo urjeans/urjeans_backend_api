@@ -87,15 +87,14 @@ const getImageUrl = (filename) => {
 };
 
 // Function to delete image file with security check
-const deleteImage = (filename) => {
-    // Security check: ensure filename doesn't contain directory traversal
+const deleteImage = async (filename) => {
     if (filename.includes('..') || filename.includes('/')) {
         throw new Error('Invalid filename');
     }
-
-    const filePath = path.join(uploadDir, filename);
-    if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
+    try {
+        await fs.promises.unlink(path.join(uploadDir, filename));
+    } catch (e) {
+        if (e.code !== 'ENOENT') throw e;
     }
 };
 
@@ -127,5 +126,6 @@ module.exports = {
     upload,
     getImageUrl,
     deleteImage,
+    processImage,
     processUploadedImages
 }; 

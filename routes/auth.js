@@ -2,9 +2,18 @@ const express = require('express');
 const router = express.Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
 const { body, validationResult } = require('express-validator');
 const { pool } = require('../config/database');
 const { auth } = require('../middleware/auth');
+
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 10,
+    message: { error: 'Too many login attempts, please try again later' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
 
 // Login validation rules
 const loginValidation = [
@@ -23,7 +32,7 @@ const passwordChangeValidation = [
 ];
 
 // Login route
-router.post('/login', loginValidation, async (req, res) => {
+router.post('/login', loginLimiter, loginValidation, async (req, res) => {
     try {
         // Check for validation errors
         const errors = validationResult(req);
