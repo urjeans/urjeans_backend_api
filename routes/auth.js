@@ -72,7 +72,7 @@ router.post('/login', loginLimiter, loginValidation, async (req, res) => {
 
         // Generate JWT token
         const token = jwt.sign(
-            { userId: user.id },
+            { userId: user.id, username: user.username, role: user.role, tokenVersion: user.token_version },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
@@ -130,15 +130,29 @@ router.post('/change-password', auth, passwordChangeValidation, async (req, res)
         const salt = await bcrypt.genSalt(10);
         const passwordHash = await bcrypt.hash(newPassword, salt);
 
-        // Update password in the password column
+        // Update password and invalidate all existing tokens
         await pool.query(
-            'UPDATE users SET password = ? WHERE id = ?',
+            'UPDATE users SET password = ?, token_version = token_version + 1 WHERE id = ?',
             [passwordHash, user.id]
         );
 
         res.json({ message: 'Password updated successfully' });
     } catch (error) {
         console.error('Password change error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// Logout — invalidates all tokens issued before this call
+router.post('/logout', auth, async (req, res) => {
+    try {
+        await pool.query(
+            'UPDATE users SET token_version = token_version + 1 WHERE id = ?',
+            [req.user.id]
+        );
+        res.json({ message: 'Logged out successfully' });
+    } catch (error) {
+        console.error('Logout error:', error);
         res.status(500).json({ error: 'Internal server error' });
     }
 });

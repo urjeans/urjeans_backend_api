@@ -8,7 +8,7 @@ const dbConfig = {
     database: process.env.DB_NAME || 'urjeans_db',
     waitForConnections: true,
     connectionLimit: 10,
-    queueLimit: 0
+    queueLimit: 50
 };
 
 const pool = mysql.createPool(dbConfig);

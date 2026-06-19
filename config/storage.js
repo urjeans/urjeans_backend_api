@@ -10,12 +10,11 @@ if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, { recursive: true });
 }
 
-// Generate secure random filename
-const generateSecureFilename = (originalname) => {
+// Generate secure random filename — always .jpg since Sharp converts all uploads to JPEG
+const generateSecureFilename = () => {
     const timestamp = Date.now();
     const randomString = crypto.randomBytes(16).toString('hex');
-    const extension = path.extname(originalname).toLowerCase();
-    return `${timestamp}-${randomString}${extension}`;
+    return `${timestamp}-${randomString}.jpg`;
 };
 
 // Configure storage with memory storage for processing
@@ -56,10 +55,9 @@ const upload = multer({
 });
 
 // Process and optimize image
-const processImage = async (buffer, filename) => {
+const processImage = async (buffer) => {
     try {
-        // Generate secure filename
-        const secureFilename = generateSecureFilename(filename);
+        const secureFilename = generateSecureFilename();
         const outputPath = path.join(uploadDir, secureFilename);
 
         // Process image with sharp
@@ -107,7 +105,7 @@ const processUploadedImages = async (req, res, next) => {
     try {
         const processedFiles = [];
         for (const file of req.files) {
-            const processedFilename = await processImage(file.buffer, file.originalname);
+            const processedFilename = await processImage(file.buffer);
             processedFiles.push({
                 filename: processedFilename,
                 originalname: file.originalname,

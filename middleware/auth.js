@@ -3,28 +3,29 @@ const { pool } = require('../config/database');
 
 const auth = async (req, res, next) => {
     try {
-        // Get token from header
         const token = req.header('Authorization')?.replace('Bearer ', '');
-        
+
         if (!token) {
             return res.status(401).json({ error: 'Authentication required' });
         }
 
-        // Verify token
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        
-        // Get user from database
-        const [users] = await pool.query(
-            'SELECT id, username, role, created_at FROM users WHERE id = ?',
+
+        // Verify token version — incremented on logout and password change
+        const [[user]] = await pool.query(
+            'SELECT token_version FROM users WHERE id = ?',
             [decoded.userId]
         );
 
-        if (users.length === 0) {
-            return res.status(401).json({ error: 'User not found' });
+        if (!user || decoded.tokenVersion !== user.token_version) {
+            return res.status(401).json({ error: 'Token has been invalidated' });
         }
 
-        // Add user to request object
-        req.user = users[0];
+        req.user = {
+            id: decoded.userId,
+            username: decoded.username,
+            role: decoded.role,
+        };
         next();
     } catch (error) {
         if (error.name === 'JsonWebTokenError') {
