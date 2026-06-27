@@ -4,7 +4,20 @@ const { body, validationResult } = require('express-validator');
 const { pool } = require('../config/database');
 const { upload, getImageUrl, deleteImage, processUploadedImages } = require('../config/storage');
 
-// Accept JSON array string ("["Blue","Black"]") or comma-separated ("Blue,Black")
+// mysql2 auto-parses JSON columns — guard in case value is already an array
+const toArray = (val) => Array.isArray(val) ? val : [];
+
+// Parse color_ids from form data — accepts JSON array string or comma-separated
+const parseIds = (val) => {
+    if (!val) return [];
+    try {
+        const parsed = JSON.parse(val);
+        return Array.isArray(parsed) ? parsed.map(Number).filter(Boolean) : [];
+    } catch {
+        return val.split(',').map(s => Number(s.trim())).filter(Boolean);
+    }
+};
+
 const parseJsonOrCsv = (val) => {
     if (!val) return [];
     try {
@@ -15,24 +28,41 @@ const parseJsonOrCsv = (val) => {
     }
 };
 
-// mysql2 auto-parses JSON columns — guard in case value is already an array
-const toArray = (val) => Array.isArray(val) ? val : [];
-
 const productValidation = [
     body('product_name').trim().notEmpty().withMessage('Product name is required').isLength({ max: 255 }),
     body('brand_id').notEmpty().withMessage('Brand is required').isInt({ min: 1 }).withMessage('Invalid brand'),
     body('style').optional().trim().isLength({ max: 50 }),
-    body('colors').notEmpty().withMessage('Colors are required'),
+    body('color_ids').notEmpty().withMessage('At least one color is required'),
     body('fabric').trim().notEmpty().withMessage('Fabric is required').isLength({ max: 255 }),
     body('sizes').notEmpty().withMessage('Sizes are required'),
     body('description').optional().trim().isLength({ max: 5000 }),
 ];
 
-// JOIN helper — every public read includes brand_name and brand_slug
+// Subquery that returns colors as a JSON array for a given product
+const COLORS_SUBQUERY = `
+    (SELECT COALESCE(
+        JSON_ARRAYAGG(JSON_OBJECT('id', c.id, 'name', c.name, 'code', c.code)),
+        JSON_ARRAY()
+    )
+    FROM product_colors pc
+    JOIN colors c ON pc.color_id = c.id
+    WHERE pc.product_id = p.id) AS colors`;
+
+// JOIN helper — every public read includes brand info and colors
 const WITH_BRAND = `
-    SELECT p.*, b.name AS brand_name, b.slug AS brand_slug
+    SELECT p.id, p.product_name, p.brand_id, b.name AS brand_name, b.slug AS brand_slug,
+           p.style, p.images, p.fabric, p.sizes, p.description,
+           p.deleted_at, p.created_at, p.updated_at,
+           ${COLORS_SUBQUERY}
     FROM products p
     JOIN brands b ON p.brand_id = b.id`;
+
+// Insert color IDs into product_colors within the given connection
+const insertProductColors = async (conn, productId, colorIds) => {
+    if (!colorIds.length) return;
+    const values = colorIds.map(cid => [productId, cid]);
+    await conn.query('INSERT INTO product_colors (product_id, color_id) VALUES ?', [values]);
+};
 
 // ---------------------------------------------------------------------------
 // Public routes
@@ -61,7 +91,7 @@ publicRouter.get('/', async (req, res) => {
     }
 });
 
-// GET /api/products/brand/:slug  — all products for a brand page
+// GET /api/products/brand/:slug
 publicRouter.get('/brand/:slug', async (req, res) => {
     try {
         const [rows] = await pool.query(
@@ -136,17 +166,20 @@ router.post('/', upload.array('images', 5), processUploadedImages, productValida
         return res.status(400).json({ errors: errors.array() });
     }
 
+    const conn = await pool.getConnection();
     try {
-        const { product_name, brand_id, style, colors, fabric, sizes, description } = req.body;
+        await conn.beginTransaction();
+
+        const { product_name, brand_id, style, color_ids, fabric, sizes, description } = req.body;
+        const colorIds = parseIds(color_ids);
         const imageUrls = req.processedFiles ? req.processedFiles.map(f => getImageUrl(f.filename)) : [];
 
-        const [result] = await pool.query(
-            'INSERT INTO products (product_name, brand_id, style, colors, images, fabric, sizes, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        const [result] = await conn.query(
+            'INSERT INTO products (product_name, brand_id, style, images, fabric, sizes, description) VALUES (?, ?, ?, ?, ?, ?, ?)',
             [
                 product_name,
                 brand_id,
                 style || '',
-                JSON.stringify(parseJsonOrCsv(colors)),
                 JSON.stringify(imageUrls),
                 fabric,
                 JSON.stringify(parseJsonOrCsv(sizes)),
@@ -154,20 +187,26 @@ router.post('/', upload.array('images', 5), processUploadedImages, productValida
             ]
         );
 
+        await insertProductColors(conn, result.insertId, colorIds);
+        await conn.commit();
+
         const [rows] = await pool.query(
             `${WITH_BRAND} WHERE p.id = ? AND p.deleted_at IS NULL`,
             [result.insertId]
         );
         res.status(201).json(rows[0]);
     } catch (error) {
+        await conn.rollback();
         console.error('Error creating product:', error);
         if (req.processedFiles) {
             for (const file of req.processedFiles) await deleteImage(file.filename);
         }
         if (error.code === 'ER_NO_REFERENCED_ROW_2') {
-            return res.status(400).json({ error: 'Invalid brand ID' });
+            return res.status(400).json({ error: 'Invalid brand ID or color ID' });
         }
         res.status(500).json({ error: 'Internal server error' });
+    } finally {
+        conn.release();
     }
 });
 
@@ -225,15 +264,15 @@ router.put('/:id', upload.array('images', 5), processUploadedImages, productVali
             .filter(url => !keptImages.includes(url))
             .map(url => url.split('/').pop());
 
-        const { product_name, brand_id, style, colors, fabric, sizes, description } = req.body;
+        const { product_name, brand_id, style, color_ids, fabric, sizes, description } = req.body;
+        const colorIds = parseIds(color_ids);
 
         await conn.query(
-            'UPDATE products SET product_name = ?, brand_id = ?, style = ?, colors = ?, images = ?, fabric = ?, sizes = ?, description = ? WHERE id = ?',
+            'UPDATE products SET product_name = ?, brand_id = ?, style = ?, images = ?, fabric = ?, sizes = ?, description = ? WHERE id = ?',
             [
                 product_name,
                 brand_id,
                 style || '',
-                JSON.stringify(parseJsonOrCsv(colors)),
                 JSON.stringify(imageUrls),
                 fabric,
                 JSON.stringify(parseJsonOrCsv(sizes)),
@@ -241,6 +280,10 @@ router.put('/:id', upload.array('images', 5), processUploadedImages, productVali
                 req.params.id,
             ]
         );
+
+        // Replace colors: delete existing then insert new
+        await conn.query('DELETE FROM product_colors WHERE product_id = ?', [req.params.id]);
+        await insertProductColors(conn, Number(req.params.id), colorIds);
 
         await conn.commit();
 
@@ -260,7 +303,7 @@ router.put('/:id', upload.array('images', 5), processUploadedImages, productVali
             for (const file of req.processedFiles) await deleteImage(file.filename);
         }
         if (error.code === 'ER_NO_REFERENCED_ROW_2') {
-            return res.status(400).json({ error: 'Invalid brand ID' });
+            return res.status(400).json({ error: 'Invalid brand ID or color ID' });
         }
         res.status(500).json({ error: 'Internal server error' });
     } finally {

@@ -82,6 +82,86 @@ publicRouter.get('/gallery', async (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
+// Colors (public read, admin write)
+// ---------------------------------------------------------------------------
+
+// GET /api/content/colors
+publicRouter.get('/colors', async (_req, res) => {
+    try {
+        const [rows] = await pool.query('SELECT * FROM colors ORDER BY name ASC');
+        res.json(rows);
+    } catch (error) {
+        console.error('Error fetching colors:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+const colorValidation = [
+    body('name').trim().notEmpty().withMessage('Color name is required').isLength({ max: 100 }),
+    body('code').trim().notEmpty().withMessage('Color code is required')
+        .matches(/^#[0-9A-Fa-f]{6}$/).withMessage('Color code must be a valid hex color (e.g. #FF0000)'),
+];
+
+// POST /api/content/colors
+protectedRouter.post('/colors', colorValidation, async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    try {
+        const { name, code } = req.body;
+        const [result] = await pool.query(
+            'INSERT INTO colors (name, code) VALUES (?, ?)',
+            [name, code.toUpperCase()]
+        );
+        const [[color]] = await pool.query('SELECT * FROM colors WHERE id = ?', [result.insertId]);
+        res.status(201).json(color);
+    } catch (error) {
+        console.error('Error creating color:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// PUT /api/content/colors/:id
+protectedRouter.put('/colors/:id', colorValidation, async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+    try {
+        const { name, code } = req.body;
+        const [[existing]] = await pool.query('SELECT id FROM colors WHERE id = ?', [req.params.id]);
+        if (!existing) return res.status(404).json({ error: 'Color not found' });
+
+        await pool.query(
+            'UPDATE colors SET name = ?, code = ? WHERE id = ?',
+            [name, code.toUpperCase(), req.params.id]
+        );
+        const [[updated]] = await pool.query('SELECT * FROM colors WHERE id = ?', [req.params.id]);
+        res.json(updated);
+    } catch (error) {
+        console.error('Error updating color:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// DELETE /api/content/colors/:id
+protectedRouter.delete('/colors/:id', async (req, res) => {
+    try {
+        const [[existing]] = await pool.query('SELECT id FROM colors WHERE id = ?', [req.params.id]);
+        if (!existing) return res.status(404).json({ error: 'Color not found' });
+
+        await pool.query('DELETE FROM colors WHERE id = ?', [req.params.id]);
+        res.json({ message: 'Color deleted successfully' });
+    } catch (error) {
+        console.error('Error deleting color:', error);
+        // ON DELETE RESTRICT — color is used by a product
+        if (error.code === 'ER_ROW_IS_REFERENCED_2') {
+            return res.status(409).json({ error: 'Cannot delete color while it is assigned to products.' });
+        }
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
+
+// ---------------------------------------------------------------------------
 // Validation
 // ---------------------------------------------------------------------------
 

@@ -3,6 +3,7 @@ const cors = require('cors');
 const path = require('path');
 const helmet = require('helmet');
 const morgan = require('morgan');
+const multer = require('multer');
 const { testConnection } = require('./config/database');
 const { publicRouter: productsPublicRouter, protectedRouter: productsProtectedRouter } = require('./routes/products');
 const { publicRouter: contentPublicRouter, protectedRouter: contentProtectedRouter } = require('./routes/content');
@@ -106,6 +107,23 @@ app.get('/', (req, res) => {
 
 // Error handling middleware
 app.use((err, req, res, next) => {
+    if (err instanceof multer.MulterError) {
+        if (err.code === 'LIMIT_FILE_SIZE') {
+            return res.status(400).json({ error: 'File too large. Maximum size per image is 15MB.' });
+        }
+        if (err.code === 'LIMIT_FILE_COUNT') {
+            return res.status(400).json({ error: 'Too many files. Maximum is 5 images.' });
+        }
+        return res.status(400).json({ error: err.message });
+    }
+    if (err.message === 'Invalid file type. Only JPEG, PNG and WebP images are allowed.' ||
+        err.message === 'Invalid file extension.' ||
+        err.message === 'Invalid filename.') {
+        return res.status(400).json({ error: err.message });
+    }
+    if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+        return res.status(400).json({ error: 'Invalid JSON in request body' });
+    }
     console.error(err.stack);
     if (err.name === 'ValidationError') {
         return res.status(400).json({ error: err.message });
