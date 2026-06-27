@@ -38,9 +38,10 @@ app.use(cors({
         'http://urjeans.uz',
         'http://www.urjeans.uz',
         'http://127.0.0.1:5500',
-        'http://localhost:5500',
+        'http://localhost:5173',
         'http://localhost:3000',
         'http://127.0.0.1:3000',
+        'https://newurjeans.netlify.app',
         process.env.FRONTEND_URL || 'http://localhost:3000'
     ],
     credentials: true,

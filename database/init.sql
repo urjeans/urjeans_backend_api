@@ -119,7 +119,7 @@ VALUES ('admin', '$2b$10$yHKnJPgCvWzQafepOoupLOztl.CWuZrGkwfamVNZlIBY13H1iA6Xe',
 INSERT IGNORE INTO brands (name, slug) VALUES
     ('Izmir',    'izmir'),
     ('Powerful', 'powerful'),
-    ('Zilver',   'zilver');
+    ('Zilwer',   'zilwer');
 
 -- Colors
 INSERT IGNORE INTO colors (name, code) VALUES
